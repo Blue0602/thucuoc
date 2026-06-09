@@ -1,0 +1,2 @@
+libz-dev
+libjpeg-dev
