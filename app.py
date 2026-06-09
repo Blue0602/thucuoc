@@ -90,12 +90,13 @@ Trân trọng."""
     # Sheet DS giao dùng để xác định tuyến của nhân viên và số điện thoại gọi khách.
     "assignment_columns": {
         "staff_name": [
+            "nhân viên thu cước", "nhan vien thu cuoc",
             "nhân viên", "nhan vien", "nv thu", "người phụ trách", "nguoi phu trach",
             "tên nhân viên", "ten nhan vien"
         ],
         "ma_tt": [
             "mã thanh toán", "ma thanh toan", "mã tt", "ma_tt", "ma tt",
-            "mã thanh toán", "mã thanh toán"
+            "ma tt", "mã thanh toán", "mã thanh toán"
         ],
         "customer_name": [
             "tên thanh toán", "ten thanh toan", "tên khách hàng", "ten khach hang",
