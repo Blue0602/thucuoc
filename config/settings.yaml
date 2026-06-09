@@ -1,8 +1,0 @@
-app:
-  title: "Mini-CRM Thu Cước KHDN"
-database:
-  path: "data/crm.db"
-imports:
-  tn08:
-    label: "Hóa đơn chưa thu"
-    sheet_name: null
