@@ -16,6 +16,9 @@ from decimal import Decimal, InvalidOperation
 import pandas as pd
 import streamlit as st
 
+# Thêm thư viện xuất báo cáo openpyxl
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # ============================================================
 # 1. CONFIGURATION
@@ -70,7 +73,7 @@ Trân trọng."""
             "ma_tt", "mã tt", "ma tt", "mã thanh toán", "ma thanh toan"
         ],
         "debt_amount": [
-            "total nợ thu vét", "total no thu vet", "total nợ thu vét",
+            "total nợ thu vét", "total no thu vet", "total nợ thu vét",
             "nợ thu vét", "no thu vet"
         ],
         "customer_name_tn08": [
@@ -129,6 +132,12 @@ def normalize_text(value) -> str:
     if text.lower() in ["nan", "nat", "none", "null"]:
         return ""
     return re.sub(r"\s+", " ", text)
+
+
+def extract_email(text):
+    text = normalize_text(text)
+    match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    return match.group(0) if match else ""
 
 
 def remove_accents(value) -> str:
@@ -423,7 +432,6 @@ def standardize_assignment(df_raw, fallback_staff=None):
     if staff_col:
         out["staff_name"] = df[staff_col]
     else:
-        # Nếu bạn chọn sheet đã lọc sẵn như sheet Thuan, có thể không cần cột nhân viên.
         out["staff_name"] = fallback_staff or APP_CONFIG["default_staff"]
 
     out["ma_tt"] = df[ma_col]
@@ -471,7 +479,6 @@ def standardize_tn08(df_raw):
 
     out = out[out["ma_tt"].astype(str).str.len() > 0].copy()
 
-    # Nếu TN08 trùng MA_TT, cộng nợ để tránh nhân dòng.
     out = out.groupby("ma_tt", as_index=False).agg({
         "debt_amount": "sum",
         "customer_name_tn08": "first",
@@ -511,7 +518,6 @@ def build_working_dataset(df_assignment, df_tn08, selected_staff):
     if df_staff.empty:
         return pd.DataFrame()
 
-    # Tối ưu: chỉ giữ các MA_TT thuộc tuyến trước khi merge.
     route_ma = set(df_staff["ma_tt"].dropna().astype(str))
     df_tn08_small = df_tn08[df_tn08["ma_tt"].isin(route_ma)].copy()
 
@@ -657,21 +663,156 @@ def render_message(period):
         staff_phone=m["staff_phone"],
     )
 
+# Hàm thay thế xuất file excel có formart theo yêu cầu
+def export_excel_report_format(df):
+    """
+    Xuất báo cáo đúng format file báo cáo thu cước.
+    Không dùng pandas.to_excel trực tiếp vì file mẫu có cột trùng tên.
+    """
 
-def export_excel(df):
-    cols = [
-        "status_emoji", "status_label", "staff_name", "ma_tt", "customer_display",
-        "current_phone", "address", "debt_amount", "debt_amount_display",
-        "generated_amount", "generated_amount_display",
-        "paid_amount", "data_status", "last_result",
-        "promised_payment_date", "last_note", "last_contacted_at"
+    report_headers = [
+        "Đưa lưới khóa",
+        "Ngày liên hệ",
+        "Ghi chú",
+        "Mail cập nhật",
+        "SĐT cập nhật",
+        "CN TN08",
+        "Tổ Thu cước",
+        "Tuyến kỹ thuật",
+        "Nhân viên thu cước",
+        "SL hđ",
+        "Mã Thanh toán",
+        "Tên thanh toán",
+        "Tiền phát sinh",
+        "Số DT liên hệ",
+        "Số seri",
+        "Địa chỉ thanh toán",
+        "ghi chú tình trạng",
+        "ghi chú tình trạng",
+        "Tên thanh toán",
+        "Tiền phát sinh",
+        "Số DT liên hệ",
+        "Số seri",
+        "Seri",
+        "Địa chỉ thanh toán",
     ]
-    out = df[[c for c in cols if c in df.columns]].copy()
-    bio = io.BytesIO()
-    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
-        out.to_excel(writer, index=False, sheet_name="Bao cao")
-    bio.seek(0)
-    return bio.getvalue()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Thuan"
+
+    header_fill = PatternFill("solid", fgColor="D9EAF7")
+    yellow_fill = PatternFill("solid", fgColor="FFF200")
+    thin = Side(style="thin", color="BFBFBF")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    for col_idx, header in enumerate(report_headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+
+    for row_idx, (_, row) in enumerate(df.iterrows(), start=2):
+        last_note = normalize_text(row.get("last_note", ""))
+        last_result = normalize_text(row.get("last_result", ""))
+        promised_date = normalize_text(row.get("promised_payment_date", ""))
+
+        note_parts = []
+        if last_result:
+            note_parts.append(last_result)
+        if promised_date:
+            note_parts.append(f"Hẹn: {promised_date}")
+        if last_note:
+            note_parts.append(last_note)
+
+        final_note = " | ".join(note_parts)
+
+        debt_amount = float(row.get("debt_amount", 0) or 0)
+        generated_amount = float(row.get("generated_amount", 0) or 0)
+
+        customer_name = normalize_text(row.get("customer_display", ""))
+        phone = normalize_text(row.get("current_phone", ""))
+        address = normalize_text(row.get("address", ""))
+        status_label = normalize_text(row.get("status_label", ""))
+        staff_name = normalize_text(row.get("staff_name", ""))
+
+        excel_values = [
+            "",                                      # Đưa lưới khóa
+            promised_date,                           # Ngày liên hệ
+            final_note,                              # Ghi chú
+            extract_email(final_note),               # Mail cập nhật
+            "",                                      # SĐT cập nhật
+            debt_amount,                             # CN TN08
+            "KD - DN",                               # Tổ Thu cước
+            normalize_text(row.get("route_name", "")) or "",  # Tuyến kỹ thuật
+            staff_name,                              # Nhân viên thu cước
+            1,                                       # SL hđ
+            normalize_text(row.get("ma_tt", "")),    # Mã Thanh toán
+            customer_name,                           # Tên thanh toán
+            generated_amount,                        # Tiền phát sinh
+            phone,                                   # Số DT liên hệ
+            normalize_text(row.get("serial", "")),   # Số seri
+            address,                                 # Địa chỉ thanh toán
+            status_label,                            # ghi chú tình trạng
+            "",                                      # ghi chú tình trạng 2
+            "",                                      # Tên thanh toán 2
+            "",                                      # Tiền phát sinh 2
+            "",                                      # Số DT liên hệ 2
+            "",                                      # Số seri 2
+            "",                                      # Seri
+            "",                                      # Địa chỉ thanh toán 2
+        ]
+
+        for col_idx, value in enumerate(excel_values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+            if col_idx == 6:
+                cell.fill = yellow_fill
+                cell.number_format = '#,##0'
+
+            if col_idx in [13, 20]:
+                cell.number_format = '#,##0'
+
+    widths = {
+        "A": 14,
+        "B": 14,
+        "C": 35,
+        "D": 25,
+        "E": 18,
+        "F": 14,
+        "G": 14,
+        "H": 24,
+        "I": 22,
+        "J": 8,
+        "K": 18,
+        "L": 45,
+        "M": 16,
+        "N": 18,
+        "O": 14,
+        "P": 55,
+        "Q": 22,
+        "R": 22,
+        "S": 45,
+        "T": 16,
+        "U": 18,
+        "V": 14,
+        "W": 14,
+        "X": 55,
+    }
+
+    for col, width in widths.items():
+        ws.column_dimensions[col].width = width
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue()
 
 
 # ============================================================
@@ -921,10 +1062,11 @@ with tabs[2]:
 
         st.dataframe(df, use_container_width=True, height=450)
 
+        # CẬP NHẬT NÚT TẢI BÁO CÁO ĐÚNG MẪU Ở ĐÂY
         st.download_button(
-            "Tải báo cáo Excel",
-            data=export_excel(df),
-            file_name="bao_cao_thu_cuoc_vuong_thanh_thuan.xlsx",
+            "Tải báo cáo đúng mẫu Excel",
+            data=export_excel_report_format(df),
+            file_name="bao_cao_thu_cuoc_dung_mau.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
